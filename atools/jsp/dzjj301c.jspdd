@@ -1,0 +1,441 @@
+﻿<%@ page buffer="64kb"
+         language = "java"
+         session = "true"
+         autoFlush = "true"
+         isThreadSafe = "true"
+         errorPage = "errorMsg.jsp"
+%>
+<%@ page import="java.io.*" %>
+<%@ page import="java.sql.*" %>
+<%@ page import="java.util.*" %>
+<%@ page import="com.icsc.dpms.de.*" %>
+<%@ page import="com.icsc.dpms.de.sql.*" %>
+<%@ page import="com.icsc.dpms.ds.*" %>
+<%@ page import="com.icsc.dpms.du.*" %>
+<%!
+	static boolean isRunLog = false;
+	static boolean isStop = false;
+	static boolean isWrite = false;
+	static int sleepTime = 30000;
+	static int countNo = 0;
+	static String runtimeStr = "";
+	static NewThread t = null;
+
+	// 執行相關資料的起始
+	public void jspInit() {
+		new NewThread();
+		runtimeStr = new dejc308().getCrntTimeFmt3() + "S";
+		System.err.println(SysId + this + runtimeStr);
+	}
+
+	// 執行關閉各種物件的動作
+	public void jspDestroy() {
+		isStop = true;
+	}
+
+	String commondFile [] = new String [] {"conTest.jsp", "errorMsg.jsp", "conList.jsp"};
+	String includeFile [] = new String [] {"dzjjcon.jsp", "dzjjerr.jsp", "dzjj301c.jsp"};
+
+	synchronized void WriteConTest(String sysId, String path, boolean isDpms, int i) throws IOException {
+		String jspPath  = path + File.separator + "jsp" + File.separator;
+
+		File jspDir = new File(jspPath);
+
+		if (jspDir.exists() == false) {
+			return;
+		}
+
+		BufferedWriter bw = new BufferedWriter(new FileWriter(jspPath + commondFile[i]));
+/*
+		bw.write("<");
+		bw.write("%@ page contentType = \"text/html;charset=UTF-8\"%");
+		bw.write(">");
+*/
+		bw.newLine();
+		bw.write("<");
+		bw.write("%! static final String SysId =\"" + sysId + "\"; %");
+		bw.write(">");
+		bw.newLine();
+		bw.write("<");
+
+		if(isDpms) {
+		  bw.write("%@ include ");
+		  bw.write("file=\"../../../jsp/" + includeFile[i] + "\" %");
+		} else {
+		  bw.write("%@ include ");
+		  bw.write("file=\"../../jsp/" + includeFile[i] + "\" %");
+		}
+
+		bw.write(">");
+		bw.newLine();
+		bw.close();
+ 	}
+
+	public String genJsp(String path, File [] files, boolean isDpms, int index)  throws IOException {
+		StringBuffer result = new StringBuffer();
+		String jspPath = path + File.separator;
+
+		for (int i=0; files != null && i<files.length; i++) {
+			if (files[i].getName().length() > 3) continue;
+			if (files[i].isDirectory()) {
+				if (isDpms) {
+					jspPath += "dpms" + File.separator;
+					result.append("dpms/");
+				}
+
+				WriteConTest(files[i].getName(), jspPath + files [i].getName(), isDpms, index);
+				result.append(files[i].getName() + ", ");
+			}
+		}
+
+		return result.toString();
+	}
+
+ 	synchronized public void writeLog(Hashtable sqlTable, int total, String nowTime) {
+		Enumeration sql = sqlTable.keys();
+
+		if (sql.hasMoreElements()) {
+			dejc308 de308 = new dejc308();
+			StringBuffer logBuf = new StringBuffer();
+			logBuf.append(nowTime + "--- [" + SysId + "] --- [" + total + "] --- ("+ de308.getCrntTimeFmt3() + ")\r\n");
+			// 訊息
+			do {
+				String conKey = (String) sql.nextElement();
+				dejc301q queryCon = (dejc301q) sqlTable.get(conKey);
+
+				if (queryCon != null) {
+					logBuf.append(SysId).append("\t");
+					logBuf.append(conKey).append("\t");
+					logBuf.append(queryCon.getAppId()).append("\t");
+					logBuf.append(queryCon.getClassId()).append("\t");
+					logBuf.append(queryCon.getUserId()).append("\t");
+					logBuf.append(queryCon.showTime(nowTime)).append("\t");
+					queryCon.toTableString(logBuf);
+					logBuf.append("\r\n");
+				}
+			} while (sql.hasMoreElements());
+			// 寫檔
+			try {
+				String fileName = "waslogs/Connection/" + de308.getCrntDateWFmt1() + "/SQL/" + SysId + de308.getCrntTimeFmt1() + ".log";
+				File conLog = new File(fileName);
+				if (conLog.exists() == false) {
+					new File(conLog.getParent()).mkdirs();
+				}
+
+				BufferedWriter bw = new BufferedWriter(new FileWriter(fileName, true), 1024);
+				bw.write(logBuf.toString());
+				bw.newLine();
+				bw.flush();
+				bw.close();
+			} catch (Exception e) {
+				e.printStackTrace();
+				System.err.println(logBuf);
+			}
+		}
+ 	}
+
+ 	void setSleepTime(String timer) {
+ 		try {
+ 			int tmp = Integer.parseInt(timer) * 1000;
+ 			if (sleepTime > 10000) {
+ 				sleepTime = tmp;
+ 			}
+ 		} catch (NumberFormatException nfe) {}
+ 	}
+
+class NewThread implements Runnable {
+	Thread t;
+
+	NewThread() {
+		// Create a new, second thread
+		t = new Thread(this, "dzjj301 - Log Thread - " + System.currentTimeMillis());
+		t.start(); // Start the thread
+	}
+
+	// This is the entry point for the second thread.
+	public void run() {
+		while (true) {
+			try {
+        		Thread.sleep(sleepTime);
+        		if (isRunLog && isWrite == false) {
+        			isWrite = true;
+					writeConLog();
+					isWrite = false;
+				}
+			} catch (InterruptedException e) {
+       			isWrite = false;
+				System.out.println("[conTest] writeConLog NewThread Interrupted: " + e);
+				runtimeStr = new dejc308().getCrntTimeFmt3() + "I";
+			} catch (Exception e) {
+				System.out.println("[conTest] writeConLog NewThread Error: " + e);
+				runtimeStr = new dejc308().getCrntTimeFmt3() + "E";
+			}
+
+			if (isStop) {
+				runtimeStr = new dejc308().getCrntTimeFmt3() + "N";
+				break;
+			}
+		}
+	}
+
+ 	synchronized public void writeConLog() {
+ 		dejc301 de301 = new dejc301();
+ 		// 使用次數
+		Hashtable appCount = de301.getAppCount();
+		Enumeration app = appCount.keys();
+		// 未關次數
+		Hashtable conCount = de301.getCount();
+		Enumeration con = conCount.keys();
+ 		// 使用微秒數
+		Hashtable poolCount = de301.getPoolCount();
+		Enumeration pool = poolCount.keys();
+		// 未關明細
+		Hashtable sqlTable = dejc301c.getSQLTable();
+		Enumeration sql = sqlTable.keys();
+
+		StringBuffer appBuf = new StringBuffer();
+		int conTotal = 0;
+		int sqlTotal = 0;
+
+		while(app.hasMoreElements()) {
+			String appId = (String) app.nextElement();
+			Integer aCount = (Integer) appCount.get(appId);
+    		Integer cCount = (Integer) conCount.get(appId);
+    		Long times = (Long) poolCount.get(appId);
+
+			appBuf.append(new dejc308().getCrntTimeFmt3()).append("\t");
+			appBuf.append(countNo).append("\t");
+			appBuf.append(appId).append("\t");
+			appBuf.append(aCount.intValue()).append("\t");
+			appBuf.append(cCount.intValue()).append("\t");
+			appBuf.append(times.longValue()).append("\r\n");
+			conTotal += cCount.intValue();
+		}
+
+		while(sql.hasMoreElements()) {
+			String conKey = (String) sql.nextElement();
+			if (sqlTable.get(conKey) != null) {
+				sqlTotal++;
+			}
+		}
+
+			// 訊息
+			StringBuffer logBuf = new StringBuffer();
+
+			logBuf.append(""+dsjcMessages.get("dzjj301c.0")+"\t");
+			logBuf.append(""+dsjcMessages.get("dzjj301c.1")+"\t");
+			logBuf.append(""+dsjcMessages.get("dzjj301c.2")+"\t");
+			logBuf.append(""+dsjcMessages.get("dzjj301c.3")+"\t");
+			logBuf.append(""+dsjcMessages.get("dzjj301c.4")+"\t");
+			logBuf.append(""+dsjcMessages.get("dzjj301c.5")+"\r\n");
+
+			logBuf.append(new dejc308().getCrntTimeFmt3()).append("\t");
+			logBuf.append(countNo).append("\t");
+			logBuf.append(SysId).append("\t");
+			logBuf.append(de301.getInt()).append("\t");
+			logBuf.append(conTotal).append("\t");
+			logBuf.append(sqlTotal).append("\r\n");
+			logBuf.append(appBuf);
+
+			// 寫檔
+			try {
+				dejc308 de308 = new dejc308();
+				runtimeStr = new dejc308().getCrntTimeFmt3() + "R";
+
+				String fileName = "waslogs/Connection/" + de308.getCrntDateWFmt1() + "/LOG/" + SysId + ".log";
+				File conLog = new File(fileName);
+				if (conLog.exists() == false) {
+					new File(conLog.getParent()).mkdirs();
+				}
+
+				BufferedWriter bw = new BufferedWriter(new FileWriter(fileName, true), 1024);
+				bw.write(logBuf.toString());
+				countNo++;
+				bw.newLine();
+				bw.flush();
+				bw.close();
+			} catch (Exception e) {
+				e.printStackTrace();
+				System.err.println(logBuf);
+			}
+ 	}
+}
+%>
+<%
+	response.setContentType("text/html;charset=" + dsjcst0.getLanguage());
+	dejc301 de301 = new dejc301 ();
+/*
+	String path = application.getRealPath("");
+	int root = path.indexOf(File.separator);
+	int appRoot = path.indexOf(File.separator, root+1);
+	path = (appRoot == -1 ) ? path : path.substring(0, appRoot);
+*/
+	String path = dejc332.getERPHome();
+
+	String conTest = request.getParameter(".ConTest");
+	String dpms = request.getParameter(".DPMS");
+	String errorMsg = request.getParameter(".ErrorMsg");
+	String conList = request.getParameter(".ConList");
+
+	String nowTime = request.getParameter(".Current");
+	String logFile = request.getParameter(".Log");
+	String runLog = request.getParameter(".Run");
+	String stopLog = request.getParameter(".Stop");
+	String timer = request.getParameter(".Time");
+
+	if (path.equals("") || new File(path).exists() == false) {
+		path = System.getProperty("user.dir");
+	}
+
+	if (nowTime == null) {
+		nowTime = "" + System.currentTimeMillis();
+	}
+
+	setSleepTime(timer);
+
+	File file = new File(path  + File.separator);
+	File[] files = file.listFiles();
+	File fileDPMS = new File(path + File.separator + "dpms" + File.separator);
+	File[] filesDPMS = fileDPMS.listFiles();
+
+
+	if (conTest != null) {
+		out.println("Gen Jsp: " + commondFile[0] + "<br>");
+		out.println(genJsp(path, files, false, 0));
+		out.println(genJsp(path, filesDPMS, true, 0));
+	}
+
+	if (errorMsg != null) {
+		out.println("Gen Jsp: " + commondFile[1] + "<br>");
+		out.println(genJsp(path, files, false, 1));
+		out.println(genJsp(path, filesDPMS, true, 1));
+	}
+
+	if (conList != null) {
+		out.println("Gen Jsp: " + commondFile[2] + "<br>");
+		out.println(genJsp(path, files, false, 2));
+		out.println(genJsp(path, filesDPMS, true, 2));
+	}
+
+	Hashtable conCount = de301.getCount();
+	Hashtable sqlTable = dejc301c.getSQLTable();
+	Enumeration con = conCount.keys();
+	Enumeration sql = sqlTable.keys();
+
+	StringBuffer conBuf = new StringBuffer();
+	StringBuffer sqlBuf = new StringBuffer();
+	int conTotal = 0;
+	int sqlTotal = 0;
+
+	while(con.hasMoreElements()) {
+	 	String appId = (String) con.nextElement();
+	 	Integer count = (Integer) conCount.get(appId);
+	 	if (count.intValue() != 0) {
+	 		conBuf.append("  <tr>\r\n");
+	 		conBuf.append("    <td colspan=2 class=light-bg-left>&nbsp;").append(appId).append("</td>\r\n");
+	 		conBuf.append("    <td style=color:red align=right bgcolor=white><b>&nbsp;").append(count.intValue()).append("</b></td>\r\n");
+	 		conBuf.append("  </tr>\r\n");
+	 		conTotal += count.intValue();
+		}
+	}
+
+	while(sql.hasMoreElements()) {
+		String conKey = (String) sql.nextElement();
+		dejc301q queryCon = (dejc301q) sqlTable.get(conKey);
+		if (queryCon != null) {
+			sqlBuf.append("  <tr class=light-bg-left>\r\n");
+			sqlBuf.append("    <td onMouseOver=showConTime(this," + conKey + ")>&nbsp;").append(conKey).append("</td>\r\n");
+			sqlBuf.append("    <td><pre>&nbsp;").append(queryCon).append("</pre></td>\r\n");
+			sqlBuf.append("  </tr>\r\n");
+			sqlTotal++;
+		}
+	}
+
+	if (logFile != null) {
+		writeLog(sqlTable, sqlTotal, nowTime);
+	}
+
+	if (runLog != null) {
+		isRunLog = true;
+	}
+
+	if (stopLog != null) {
+		isRunLog = false;
+	}
+
+	dejc300 de300 = new dejc300();
+%>
+<html>
+<head>
+<title>Connect <%=dsjcMessages.get("dzjj301c.6")%> Ⅲ(<%= isRunLog %>)</title>
+<meta http-equiv="pragma" content="no-cache">
+<meta http-equiv="expires" content="0">
+<meta http-equiv="cache-control" content="no-cache">
+<meta http-equiv="Content-Language" content="zh-tw">
+<meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+<link rel=stylesheet href="<%= de300.html("", "/dzwcss.gui") %>" type="text/css">
+<script language="JavaScript" src="<%= de300.html("de", "/dejtb01.jss") %>"></script>
+</head>
+<body leftmargin="0" topmargin="0" class="whole-bg">
+<form name="form1" method="post" action="">
+  <table border="0" class=function-bar cellspacing="2" cellpadding="0" align="center" width=100%>
+    <tr>
+      <th><%= (isRunLog) ? "Y" : "N" %></th>
+      <th nowrap class=msg><%= sleepTime / 1000 %> <%=dsjcMessages.get("dzjj301c.7")%> / <%= countNo %></th>
+      <th nowrap class=subsys-title><%= runtimeStr %></th>
+    </tr>
+    <tr>
+      <th><a target="_blank" href="/erp/<%= SysId.toLowerCase() %>/jsp/conTest.jsp"><img border=0 src="/erp/images/dzwirun.gif"></a></th>
+      <th nowrap class=msg><%= SysId.toUpperCase() %>: <%= conTotal%> / <%= de301.getInt()%></th>
+      <th nowrap class=subsys-title><%=dsjcMessages.get("dzjj301c.4")%></th>
+    </tr>
+    <%= conBuf.toString() %>
+  </table>
+  <table id="DZJJ301LIST" border="0" class=function-bar cellspacing="2" cellpadding="0" align="center" width=100%>
+    <tr>
+      <th nowrap class=msg><a target="_blank" href="/erp/<%= SysId.toLowerCase() %>/jsp/conList.jsp?.CURRENT=<%= nowTime %>"><img border=0 src="/erp/images/dzwirun.gif"></a>
+      <%= SysId.toUpperCase() %>: <%= sqlTotal%> / <%= de301.getInt()%></th>
+      <th nowrap class=subsys-title><%=dsjcMessages.get("dzjj301c.8")%></th>
+    </tr>
+    <%= sqlBuf.toString() %>
+  </table>
+</form>
+<script>
+
+dejtb01Init("DZJJ301LIST");
+
+function showConTime(obj, startTime) {
+	nowTime = <%= nowTime %>;
+	var a = new Date(startTime);
+	var b = new Date(nowTime);
+
+	hh = b.getHours() - a.getHours();
+	mm = b.getMinutes() - a.getMinutes();
+	if (mm < 0) {
+		hh--;
+		mm = 60 + mm;
+	}
+
+	ss = b.getSeconds() - a.getSeconds();
+
+	if (ss < 0) {
+		mm--;
+		ss = 60 + ss;
+	}
+
+	ms = b.getMilliseconds() - a.getMilliseconds();
+
+	if (ms < 0) {
+		ss--;
+		ms = 1000 + ms;
+	}
+
+	obj.innerText = formatDate(hh, 2) + ":" + formatDate(mm, 2) + ":" + formatDate(ss, 2) + "." + formatDate(ms, 3);
+}
+
+function formatDate(time, len) {
+	var result = (len == 2) ? "00" + time : "000" +time;
+
+	return result.substring(result.length - len);
+}
+</script>
